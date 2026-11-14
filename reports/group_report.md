@@ -6,83 +6,83 @@
 
 ## 00 · Header
 
-| Mục | Giá trị |
-|---|---|
-| Group ID | G__ |
-| Challenge | T__ · ______________________ |
-| Thành viên (5–6) + vai trò | 1. ____ (Lead/Integrator) · 2. ____ (Data & fixtures) · 3. ____ (Core algorithm) · 4. ____ (QA/metric) · 5. ____ (Review + report) · 6. ____ |
-| Git URL | ____ |
-| Tag `demo-180m` (commit) | ____ |
-| Tag `final-24h` (commit) | ____ |
-| Deadline (giờ VN) | ____ |
+| Mục                        | Giá trị                                                                                                                                                  |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Group ID                   | G\_\_                                                                                                                                                    |
+| Challenge                  | T** · ********\_\_\_\_**********                                                                                                                         |
+| Thành viên (5–6) + vai trò | 1. \_**\_ (Lead/Integrator) · 2. \_\_** (Data & fixtures) · 3. \_**\_ (Core algorithm) · 4. \_\_** (QA/metric) · 5. \_**\_ (Review + report) · 6. \_\_** |
+| Git URL                    | \_\_\_\_                                                                                                                                                 |
+| Tag `demo-180m` (commit)   | \_\_\_\_                                                                                                                                                 |
+| Tag `final-24h` (commit)   | \_\_\_\_                                                                                                                                                 |
+| Deadline (giờ VN)          | \_\_\_\_                                                                                                                                                 |
 
 ## 01 · Problem statement
 
-- Ai bị ảnh hưởng / ai chịu hậu quả khi hệ thống sai? ____
-- Điểm nghẽn cụ thể: ____
-- Đầu vào → đầu ra: ____
-- Tiêu chí GO / HOLD / REWORK (chốt trước khi chạy eval): ____
-- Giả định của nhóm (cần DPO/legal/domain owner xác nhận): ____
+- Ai bị ảnh hưởng / ai chịu hậu quả khi hệ thống sai? \_\_\_\_
+- Điểm nghẽn cụ thể: \_\_\_\_
+- Đầu vào → đầu ra: \_\_\_\_
+- Tiêu chí GO / HOLD / REWORK (chốt trước khi chạy eval): \_\_\_\_
+- Giả định của nhóm (cần DPO/legal/domain owner xác nhận): \_\_\_\_
 
 ## 02 · Data & provenance
 
-| Split | N | Nguồn / link | License | Synthetic? |
-|---|---|---|---|---|
-| dev | | | | |
-| eval / heldout | | | | |
+| Split          | N   | Nguồn / link | License | Synthetic? |
+| -------------- | --- | ------------ | ------- | ---------- |
+| dev            |     |              |         |            |
+| eval / heldout |     |              |         |            |
 
-- Schema & class mapping: ____
-- Seed: 42 · Cách chia split (theo scene/group/segment?): ____
+- Schema & class mapping: \_\_\_\_
+- Seed: 42 · Cách chia split (theo scene/group/segment?): \_\_\_\_
 - `manifest.csv` verified (sha256): có / không — lệnh: `python -m tools.verify_manifests`
-- Dữ liệu thật dùng (nếu có) và cách xây GT cho nó: ____
+- Dữ liệu thật dùng (nếu có) và cách xây GT cho nó: \_\_\_\_
 
 ## 03 · Research & design
 
-- 2–3 references (URL + ngày xem) và **vì sao** chọn kỹ thuật: ____
-- Sơ đồ data flow (input → process → rank/QC → review → decision → report): ____
-- Thành phần offline (model/weights + checksum + license nếu có): ____
-- Trade-offs đã cân nhắc: ____
+- 2–3 references (URL + ngày xem) và **vì sao** chọn kỹ thuật: \_\_\_\_
+- Sơ đồ data flow (input → process → rank/QC → review → decision → report): \_\_\_\_
+- Thành phần offline (model/weights + checksum + license nếu có): \_\_\_\_
+- Trade-offs đã cân nhắc: \_\_\_\_
 
 ## 04 · Baseline vs PoC
 
-- Baseline (mô tả, version/config, commit): ____
-- PoC (mô tả, version/config, commit): ____
-- Cùng budget / cùng heldout / cùng seed: xác nhận ____
+- Baseline (mô tả, version/config, commit): \_\_\_\_
+- PoC (mô tả, version/config, commit): \_\_\_\_
+- Cùng budget / cùng heldout / cùng seed: xác nhận \_\_\_\_
 
 **Bảng 1 · Baseline vs PoC & hard slices** — dán output của
 `python -m src.compare reports/metrics_baseline.json reports/metrics_poc.json`:
 
-| Metric (unit) | Baseline | PoC | Δ & chú thích |
-|---|---|---|---|
-| Primary: ______ | ____ | ____ | ____; higher/lower? |
-| Hard-slice: ______ | ____ | ____ | ____; N=__ |
-| Review@B / miss / FP | ____ | ____ | ____; B=__ |
-| Runtime / 100 items | ____ | ____ | ____; CPU=__ |
+| Metric (unit)        | Baseline | PoC      | Δ & chú thích           |
+| -------------------- | -------- | -------- | ----------------------- |
+| Primary: **\_\_**    | \_\_\_\_ | \_\_\_\_ | \_\_\_\_; higher/lower? |
+| Hard-slice: **\_\_** | \_\_\_\_ | \_\_\_\_ | \_**\_; N=**            |
+| Review@B / miss / FP | \_\_\_\_ | \_\_\_\_ | \_**\_; B=**            |
+| Runtime / 100 items  | \_\_\_\_ | \_\_\_\_ | \_**\_; CPU=**          |
 
 ## 05 · Evaluation protocol
 
-- Công thức primary metric, đơn vị đánh giá, TP/FP/FN, denominator: ____ (xem `reports/metric_contract.md`)
-- Threshold / budget B / K và lúc chốt: ____
-- Độ bất định (CI/bootstrap/variance) khi N nhỏ: ____
+- Công thức primary metric, đơn vị đánh giá, TP/FP/FN, denominator: \_\_\_\_ (xem `reports/metric_contract.md`)
+- Threshold / budget B / K và lúc chốt: \_\_\_\_
+- Độ bất định (CI/bootstrap/variance) khi N nhỏ: \_\_\_\_
 - Lệnh evaluate chính xác: `python -m src.evaluate --track t__ --pred ... --out ...`
 
 ## 06 · Result slices
 
-| Slice | N | Baseline | PoC | Ghi chú |
-|---|---|---|---|---|
-| | | | | |
-| | | | | |
+| Slice | N   | Baseline | PoC | Ghi chú |
+| ----- | --- | -------- | --- | ------- |
+|       |     |          |     |         |
+|       |     |          |     |         |
 
-- Failure case 1 (ảnh/metadata + root cause): ____
-- Failure case 2: ____
-- Latency / compute (máy, CPU, ms/item): ____
+- Failure case 1 (ảnh/metadata + root cause): \_\_\_\_
+- Failure case 2: \_\_\_\_
+- Latency / compute (máy, CPU, ms/item): \_\_\_\_
 
 ## 07 · Human & decision
 
-- Review queue (file, B, cách ưu tiên): ____
-- Cách override + audit log (`out/audit_log.jsonl`): ____
-- Decision policy + `reason_code` + owner: ____
-- Khi nào HOLD/REWORK thay vì tự động release: ____
+- Review queue (file, B, cách ưu tiên): \_\_\_\_
+- Cách override + audit log (`out/audit_log.jsonl`): \_\_\_\_
+- Decision policy + `reason_code` + owner: \_\_\_\_
+- Khi nào HOLD/REWORK thay vì tự động release: \_\_\_\_
 
 ## 08 · Reproduce & tests
 
@@ -93,34 +93,34 @@ python -m src.evaluate --track t__ --pred out/<file> --out reports/metrics_poc.j
 pytest -q
 ```
 
-- Output của `pytest -q`: ____
-- Máy / CPU / OS / Python: ____ · git sha: ____
+- Output của `pytest -q`: \_\_\_\_
+- Máy / CPU / OS / Python: \_**\_ · git sha: \_\_**
 
 ## 09 · Limitations & ethics
 
-- Rủi ro pháp lý / PII / license: ____
-- Điều chưa biết; false alarms; nếu scale 10× thì sao: ____
-- Không tuyên bố "đạt GDPR / luật Việt Nam" từ checklist tự động; giả định cần DPO/legal xác nhận: ____
-- Kế hoạch cải tiến: ____
+- Rủi ro pháp lý / PII / license: \_\_\_\_
+- Điều chưa biết; false alarms; nếu scale 10× thì sao: \_\_\_\_
+- Không tuyên bố "đạt GDPR / luật Việt Nam" từ checklist tự động; giả định cần DPO/legal xác nhận: \_\_\_\_
+- Kế hoạch cải tiến: \_\_\_\_
 
 ## 10 · Team contribution
 
 **Bảng 2 · Individual contribution evidence** (đối chiếu với `git shortlog -sne --all` và `reports/team_contributions.csv`)
 
-| Học viên | Git author/email | Module / vai trò | Commit SHA / diff chứng minh | Trình bày? |
-|---|---|---|---|---|
-| Member 1 | | Integration / CLI | | |
-| Member 2 | | Data + GT | | |
-| Member 3 | | Core algorithm | | |
-| Member 4 | | Metric + tests | | |
-| Member 5 | | Review queue + report | | |
-| Member 6 (nếu có) | | Research / ablation / debate | | |
+| Học viên         | Git author/email | Module / vai trò      | Commit SHA / diff chứng minh | Trình bày? |
+| ---------------- | ---------------- | --------------------- | ---------------------------- | ---------- |
+| Vũ Đức Toàn      |                  | Integration / CLI     |                              |            |
+| Ngô Trí Anh      |                  | Data + GT             |                              |            |
+| Hoàng Vũ         |                  | Core algorithm        |                              |            |
+| Nguyễn Thanh Sơn |                  | Metric + tests        |                              |            |
+| Hữu Thủy         |                  | Review queue + report |                              |            |
+| Mạnh Hùng        |                  | Review queue + report |                              |            |
 
 ## 11 · References
 
 | URL | Ngày xem | 1–2 dòng ý nghĩa (không chép nguyên văn) |
-|---|---|---|
-| | | |
+| --- | -------- | ---------------------------------------- |
+|     |          |                                          |
 
 ---
 
