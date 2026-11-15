@@ -15,6 +15,7 @@ Rules: never read fixtures/*/gt/ here (the GT guard will stop you); seed everyth
 no network calls; fail loudly on missing models instead of downloading.
 See src/examples/random_baseline.py for a minimal end-to-end wiring example.
 """
+test commit
 from __future__ import annotations
 
 import pandas as pd
