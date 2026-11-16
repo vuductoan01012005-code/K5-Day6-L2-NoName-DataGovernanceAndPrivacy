@@ -14,7 +14,6 @@ def make_t02_data(tmp_path: Path):
         {"image_id": "c", "is_defect": 1, "defect_type": "glare", "light": "day",   "split": "eval"},
         {"image_id": "d", "is_defect": 0, "defect_type": "none",  "light": "day",   "split": "eval"},
         {"image_id": "e", "is_defect": 0, "defect_type": "none",  "light": "dusk",  "split": "eval"},
-        # Dev sample: must not affect evaluation.
         {"image_id": "x", "is_defect": 1, "defect_type": "blur",  "light": "day",   "split": "dev"},
     ])
 
@@ -45,12 +44,12 @@ def test_t02_recall_precision_and_eval_split(tmp_path):
         gt_path, pred_path, {"budget": 2, "split": "eval"}
     )
 
-    # Top 2 in eval: b (clean), a (defect).
+    # 2 vị trí dẫn đầu trong đánh giá: b (sạch), a (có lỗi).
     assert metric_value(result, "Defect Recall@B") == pytest.approx(0.5)
     assert metric_value(result, "Precision@B") == pytest.approx(0.5)
     assert metric_value(result, "Defect-type accuracy (GT defects)") == pytest.approx(1.0)
 
-    # The dev image x has score 1.0 but must not enter eval.
+    # Ảnh phát triển (dev image) x có điểm số 1.0 nhưng không được phép đưa vào tập đánh giá (eval).
     assert "eval N=5" in result.notes[0]
 
 
