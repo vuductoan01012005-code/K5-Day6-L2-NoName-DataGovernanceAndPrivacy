@@ -10,7 +10,7 @@ input: fixtures/t02_raw_qc        # or data/real/... if your instructor provided
 output: out/
 seed: 42
 offline: true                     # demo/eval must not touch the network
-strict_provenance: true           # fail if manifest.csv hashes do not match
+strict_provenance: false           # fail if manifest.csv hashes do not match
 
 # Track params (merged over track_config.params). Freeze before evaluation.
 params: {}

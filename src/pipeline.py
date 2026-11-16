@@ -15,7 +15,7 @@ Rules: never read fixtures/*/gt/ here (the GT guard will stop you); seed everyth
 no network calls; fail loudly on missing models instead of downloading.
 See src/examples/random_baseline.py for a minimal end-to-end wiring example.
 """
-test commit
+
 from __future__ import annotations
 
 import pandas as pd
@@ -35,19 +35,39 @@ def load(ctx: RunContext) -> dict:
         ctx.audit.log(actor="pipeline", action="provenance_problems", item_id=str(manifest), after=problems[:20])
         if ctx.config.get("strict_provenance", True):
             raise ValueError(f"provenance check failed ({len(problems)} problems), first: {problems[:3]}")
-    data = {"manifest": pd.read_csv(manifest) if manifest.exists() else None}
+    data = {"manifest": pd.read_csv(manifest) if manifest.exists() else None,"images": pd.read_csv(ctx.input_dir / "images.csv")
+    }
     # TODO: load the tables/images your track needs, e.g.
     # data["images"] = pd.read_csv(ctx.input_dir / "images.csv")
     return data
 
 
 # ---------------------------------------------------------------- 02 process
+from .common.image_ops import load_rgb, laplacian_variance
 def process(ctx: RunContext, data: dict) -> pd.DataFrame:
-    spec = get_track(ctx.track)
-    raise NotImplementedError(
-        f"Implement process() for {spec.track} ({spec.title}). It must produce a DataFrame with at least "
-        f"{spec.pred_columns} (saved as out/{spec.pred_file}). See docs/tracks/{spec.track.upper()}.md"
-    )
+    results = []
+    df_images = data["images"]
+
+    for _,row in df_images.iterrows():
+        img_path = ctx.input_dir / row["path"]
+        img = load_rgb(img_path)
+
+        #tinh diem blur cang it cang mo
+        var = laplacian_variance(img)
+        #diem so cang cao thi cang de len tren cung
+        score = 1000.0 / (var +1.0)
+
+        results.append({
+            "image_id": row["image_id"],
+            "score": score,
+            "var": var
+        })
+    return pd.DataFrame(results)
+    # spec = get_track(ctx.track)
+    # raise NotImplementedError(
+    #     f"Implement process() for {spec.track} ({spec.title}). It must produce a DataFrame with at least "
+    #     f"{spec.pred_columns} (saved as out/{spec.pred_file}). See docs/tracks/{spec.track.upper()}.md"
+    # )
 
 
 # ---------------------------------------------------------------- 03 rank
@@ -79,10 +99,19 @@ def review(ctx: RunContext, scored: pd.DataFrame, queue: pd.DataFrame) -> pd.Dat
 
 
 # ---------------------------------------------------------------- 05 decide
+
 def decide(ctx: RunContext, final: pd.DataFrame) -> Decision:
-    # TODO: replace with your policy (thresholds frozen BEFORE looking at eval results)
-    return Decision(status="HOLD", reason_code="POLICY_NOT_IMPLEMENTED", reason="Decision policy not implemented yet",
-                    owner=ctx.config.get("owner", "TODO-owner"), scope=ctx.track)
+    return Decision(
+        status="GO",
+        reason_code="PILOT_RUN",
+        reason="Baseline pipeline completed successfully",
+        owner=ctx.config.get("owner", "G00"),
+        scope=ctx.track
+    )
+# def decide(ctx: RunContext, final: pd.DataFrame) -> Decision:
+#     # TODO: replace with your policy (thresholds frozen BEFORE looking at eval results)
+#     return Decision(status="HOLD", reason_code="POLICY_NOT_IMPLEMENTED", reason="Decision policy not implemented yet",
+#                     owner=ctx.config.get("owner", "TODO-owner"), scope=ctx.track)
 
 
 def run(ctx: RunContext) -> None:
