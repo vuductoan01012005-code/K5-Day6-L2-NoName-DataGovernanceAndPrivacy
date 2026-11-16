@@ -43,31 +43,156 @@ def load(ctx: RunContext) -> dict:
 
 
 # ---------------------------------------------------------------- 02 process
-from .common.image_ops import load_rgb, laplacian_variance
 def process(ctx: RunContext, data: dict) -> pd.DataFrame:
-    results = []
-    df_images = data["images"]
+    """Extract image-quality features and calculate suspicion scores.
 
-    for _,row in df_images.iterrows():
-        img_path = ctx.input_dir / row["path"]
-        img = load_rgb(img_path)
+    Higher score means more suspicious.
 
-        #tinh diem blur cang it cang mo
-        var = laplacian_variance(img)
-        #diem so cang cao thi cang de len tren cung
-        score = 1000.0 / (var +1.0)
+    Feature weights are fixed before evaluation:
+    - Blur risk: 45%
+    - Darkness risk: 30%
+    - Glare risk: 25%
 
-        results.append({
-            "image_id": row["image_id"],
-            "score": score,
-            "var": var
+    Risk percentiles are calibrated using dev images only.
+    """
+
+    if ctx.track != "t02":
+        raise ValueError(
+            f"This pipeline implements T02 only, not {ctx.track}"
+        )
+
+    images = data["images"].copy()
+    records = []
+
+    for row in images.itertuples(index=False):
+        image_path = _image_path(ctx.input_dir, row.path)
+
+        with Image.open(image_path) as source:
+            rgb = np.asarray(source.convert("RGB"))
+
+        gray = to_gray(rgb)
+
+        # Blur feature: low Laplacian variance means less sharp.
+        sharpness = float(laplacian_variance(gray))
+
+        # Brightness and glare features.
+        gray_float = np.asarray(gray, dtype=np.float32)
+        brightness_mean = float(gray_float.mean())
+        brightness_std = float(gray_float.std())
+
+        frac_dark = float(np.mean(gray_float < 30))
+        frac_saturated = float(np.mean(gray_float > 245))
+
+        records.append({
+            "image_id": str(row.image_id),
+            "path": str(row.path),
+            "camera_id": str(row.camera_id),
+            "light": str(row.light),
+            "split": str(row.split),
+            "sharpness": sharpness,
+            "brightness_mean": brightness_mean,
+            "brightness_std": brightness_std,
+            "frac_dark": frac_dark,
+            "frac_saturated": frac_saturated,
+            "evidence_path": str(image_path),
         })
-    return pd.DataFrame(results)
-    # spec = get_track(ctx.track)
-    # raise NotImplementedError(
-    #     f"Implement process() for {spec.track} ({spec.title}). It must produce a DataFrame with at least "
-    #     f"{spec.pred_columns} (saved as out/{spec.pred_file}). See docs/tracks/{spec.track.upper()}.md"
-    # )
+
+    features = pd.DataFrame(records)
+
+    dev = features[features["split"] == "dev"]
+
+    if dev.empty:
+        raise ValueError("No dev images available for calibration")
+
+    # All calibration distributions come from dev, never eval.
+    blur_risk = _risk_from_dev(
+        features["sharpness"],
+        dev["sharpness"],
+        low_is_risk=True,
+    )
+
+    dark_risk = _risk_from_dev(
+        features["frac_dark"],
+        dev["frac_dark"],
+        low_is_risk=False,
+    )
+
+    glare_risk = _risk_from_dev(
+        features["frac_saturated"],
+        dev["frac_saturated"],
+        low_is_risk=False,
+    )
+
+    # Fixed weighted combination.
+    features["score"] = (
+        0.45 * blur_risk
+        + 0.30 * dark_risk
+        + 0.25 * glare_risk
+    )
+
+    # Identify the dominant signal for human review.
+    risk_matrix = np.column_stack([
+        blur_risk,
+        dark_risk,
+        glare_risk,
+    ])
+
+    risk_names = np.array([
+        "BLUR_SUSPECT",
+        "DARK_IMAGE",
+        "GLARE_SUSPECT",
+    ])
+
+    features["reason"] = risk_names[
+        np.argmax(risk_matrix, axis=1)
+    ]
+
+    features["suggested_action"] = np.where(
+        features["score"] >= 0.65,
+        "RECAPTURE",
+        "KEEP",
+    )
+
+    features["slice"] = (
+        "camera=" + features["camera_id"]
+        + ";light=" + features["light"]
+    )
+
+    features = features.sort_values(
+        ["score", "image_id"],
+        ascending=[False, True],
+        kind="mergesort",
+    ).reset_index(drop=True)
+
+    ctx.stats["n_dev"] = len(dev)
+    ctx.stats["feature_weights"] = {
+        "blur": 0.45,
+        "darkness": 0.30,
+        "glare": 0.25,
+    }
+    ctx.stats["score_threshold_for_recapture"] = 0.65
+    ctx.stats["mean_score"] = float(features["score"].mean())
+
+    _log(
+        ctx,
+        actor="pipeline",
+        action="process_images",
+        item_id="T02",
+        after={
+            "n_images": len(features),
+            "n_dev": len(dev),
+            "features": [
+                "sharpness",
+                "brightness_mean",
+                "brightness_std",
+                "frac_dark",
+                "frac_saturated",
+            ],
+        },
+    )
+
+    return features
+
 
 
 # ---------------------------------------------------------------- 03 rank
