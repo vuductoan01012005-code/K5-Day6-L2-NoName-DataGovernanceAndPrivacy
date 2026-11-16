@@ -145,6 +145,7 @@ def eval_t02(gt_path: Path, pred_path: Path, cfg: dict) -> EvalOutput:
     gt = _split(pd.read_csv(gt_path), cfg, "eval")
     pred = pd.read_csv(pred_path)
     _need(pred, ["image_id", "score"], "ranked_review.csv")
+    _unique(pred, ["image_id"], "ranked_review.csv")
     pred = pred[pred.image_id.isin(gt.image_id)].sort_values("score", ascending=False, kind="mergesort")
     B = int(cfg.get("budget", 20))
     pos = gt.loc[gt.is_defect == 1, "image_id"]
