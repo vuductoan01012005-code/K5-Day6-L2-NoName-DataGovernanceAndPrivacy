@@ -1,6 +1,6 @@
 member,git_author_name,git_email,role,modules_files,commit_shas,evidence_note,presenter
-Member 1,,,Lead / Integrator,src/main.py; configs/,,,
-Member 2,,,Data & fixtures,fixtures/; tools/,,,
-Member 3,,,Core algorithm,src/pipeline.py,,,
-Member 4,,,QA / metric,tests/; reports/metrics_*.json,,,
-Member 5,,,Human review + report,reports/group_report.md; demo/,,,
+Member 1,https://github.com/vuductoan01012005-code,vuductoan01012005@gmail.com,Lead / Integrator,src/main.py; configs/,,,Vũ Đức Toàn
+Member 2,,,Data & fixtures,fixtures/; tools/,,,Ngô Trí Anh
+Member 3,,,Core algorithm,src/pipeline.py,,,Hoàng Vũ
+Member 4,,,QA / metric,tests/; reports/metrics_*.json,,,Nguyễn Thanh Sơn
+Member 5,,,Human review + report,reports/group_report.md; demo/,,,Hoàng Mạnh Hùng, Hữu Thủy
