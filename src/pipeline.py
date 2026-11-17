@@ -1,48 +1,174 @@
-"""YOUR PoC PIPELINE — this is the file your group owns.
 
-Lab contract = 5 automated steps, run by `python -m src.main ...`:
-    01 load      input + provenance check (manifest.csv)
-    02 process   your algorithm / model (the research part)
-    03 rank      prioritise for a fixed review budget B
-    04 review    human-in-the-loop: queue -> reviewer decisions -> overrides + audit log
-    05 decide    GO / HOLD / REWORK (or track equivalent) with reason_code + owner, write outputs
+"""T02 Raw QC Triage pipeline.
 
-Required output: out/<pred_file> with the columns listed for your track in
-docs/tracks/TXX.md (also in src/metrics/tracks.py::TRACKS). Then evaluate with
-    python -m src.evaluate --track tXX --pred out/<pred_file>
+Stages:
+1. Load metadata and verify provenance.
+2. Extract image-quality features and calculate suspicion scores.
+3. Rank the top-B images for human review.
+4. Apply human review decisions and write audit events.
+5. Produce a GO / HOLD / REWORK decision.
 
-Rules: never read fixtures/*/gt/ here (the GT guard will stop you); seed everything via ctx.rng;
-no network calls; fail loudly on missing models instead of downloading.
-See src/examples/random_baseline.py for a minimal end-to-end wiring example.
+The pipeline never reads ground-truth files.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import numpy as np
 import pandas as pd
+from PIL import Image
 
 from .common.context import RunContext
 from .common.decision import Decision, write_decision
 from .common.manifest import verify_manifest
-from .common.review import load_review_decisions, make_review_queue, write_review_queue
+from .common.image_ops import to_gray, laplacian_variance
+from .common.review import (
+    load_review_decisions,
+    make_review_queue,
+    write_review_queue,
+)
+from .common.contact_sheet import render_contact_sheet
 from .metrics.tracks import get_track
 
 
-# ---------------------------------------------------------------- 01 load
+# ---------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------
+
+def _log(ctx, actor: str, action: str, item_id: str, after=None):
+    """Write an audit event when an AuditLog is available."""
+    if ctx.audit is not None:
+        ctx.audit.log(
+            actor=actor,
+            action=action,
+            item_id=str(item_id),
+            after=after,
+        )
+
+
+def _image_path(input_dir: Path, relative_path: str) -> Path:
+    """Resolve an image path safely inside the input directory."""
+    root = input_dir.resolve()
+    path = (root / relative_path).resolve()
+
+    if not path.is_relative_to(root):
+        raise ValueError(f"Image path escapes input directory: {relative_path}")
+
+    if not path.exists():
+        raise FileNotFoundError(f"Image not found: {path}")
+
+    return path
+
+
+def _risk_from_dev(values, dev_values, low_is_risk=False):
+    """Convert a feature into a 0..1 risk score using dev distribution only."""
+    reference = np.sort(np.asarray(dev_values, dtype=float))
+    current = np.asarray(values, dtype=float)
+
+    if len(reference) == 0:
+        raise ValueError("Cannot calibrate risk without dev images")
+
+    percentile = np.searchsorted(
+        reference, current, side="right"
+    ) / len(reference)
+
+    if low_is_risk:
+        return 1.0 - percentile
+
+    return percentile
+
+
+# ---------------------------------------------------------
+# 01 LOAD
+# ---------------------------------------------------------
+
 def load(ctx: RunContext) -> dict:
-    manifest = ctx.input_dir / "manifest.csv"
-    problems = verify_manifest(manifest) if manifest.exists() else [{"problem": "no_manifest"}]
+    """Verify manifest and load image metadata."""
+
+    input_dir = ctx.input_dir
+
+    if not input_dir.exists():
+        raise FileNotFoundError(f"Input directory not found: {input_dir}")
+
+    manifest_path = input_dir / "manifest.csv"
+    images_path = input_dir / "images.csv"
+
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Missing manifest: {manifest_path}")
+
+    if not images_path.exists():
+        raise FileNotFoundError(f"Missing images.csv: {images_path}")
+
+    problems = verify_manifest(manifest_path)
+
     if problems:
-        ctx.audit.log(actor="pipeline", action="provenance_problems", item_id=str(manifest), after=problems[:20])
+        _log(
+            ctx,
+            actor="pipeline",
+            action="provenance_problems",
+            item_id=str(manifest_path),
+            after=problems[:20],
+        )
+
         if ctx.config.get("strict_provenance", True):
-            raise ValueError(f"provenance check failed ({len(problems)} problems), first: {problems[:3]}")
-    data = {"manifest": pd.read_csv(manifest) if manifest.exists() else None,"images": pd.read_csv(ctx.input_dir / "images.csv")
+            raise ValueError(
+                f"Manifest verification failed: {len(problems)} problem(s). "
+                f"First problems: {problems[:3]}"
+            )
+
+    images = pd.read_csv(images_path)
+
+    required = {
+        "image_id",
+        "path",
+        "camera_id",
+        "light",
+        "split",
     }
-    # TODO: load the tables/images your track needs, e.g.
-    # data["images"] = pd.read_csv(ctx.input_dir / "images.csv")
-    return data
+
+    missing = required - set(images.columns)
+
+    if missing:
+        raise ValueError(
+            f"images.csv missing columns: {sorted(missing)}"
+        )
+
+    if images.empty:
+        raise ValueError("images.csv contains no images")
+
+    if images["image_id"].duplicated().any():
+        raise ValueError("Duplicate image_id found in images.csv")
+
+    images["image_id"] = images["image_id"].astype(str)
+    images["path"] = images["path"].astype(str)
+    images["split"] = images["split"].astype(str).str.lower()
+
+    if not images["split"].isin(["dev", "eval"]).all():
+        raise ValueError("Unexpected split value; expected dev/eval")
+
+    ctx.stats["manifest_verified"] = not problems
+    ctx.stats["n_manifest_problems"] = len(problems)
+    ctx.stats["n_images_loaded"] = len(images)
+
+    _log(
+        ctx,
+        actor="pipeline",
+        action="load_images_metadata",
+        item_id="images.csv",
+        after={"n_images": len(images)},
+    )
+
+    return {
+        "manifest": pd.read_csv(manifest_path),
+        "images": images,
+    }
 
 
-# ---------------------------------------------------------------- 02 process
+# ---------------------------------------------------------
+# 02 PROCESS
+# ---------------------------------------------------------
+
 def process(ctx: RunContext, data: dict) -> pd.DataFrame:
     """Extract image-quality features and calculate suspicion scores.
 
@@ -194,57 +320,378 @@ def process(ctx: RunContext, data: dict) -> pd.DataFrame:
     return features
 
 
+# ---------------------------------------------------------
+# 03 RANK
+# ---------------------------------------------------------
 
-# ---------------------------------------------------------------- 03 rank
 def rank(ctx: RunContext, scored: pd.DataFrame) -> pd.DataFrame:
-    """Default: top-B by `score`. Adapt id/score/reason columns to your track."""
+    """Create the top-B review queue and an offline contact sheet."""
+
     budget = int(ctx.param("budget", 20))
-    if "score" not in scored.columns:
-        raise ValueError("rank(): process() output needs a numeric `score` column (higher = review first), "
-                         "or adapt rank() to your track")
-    q = make_review_queue(scored, id_col=scored.columns[0], score_col="score", budget=budget,
-                          reason_col="reason" if "reason" in scored.columns else None)
-    write_review_queue(q, ctx.out("review_queue.csv"))
-    return q
+
+    if budget <= 0:
+        raise ValueError("Review budget must be positive")
+
+    queue = make_review_queue(
+        scored,
+        id_col="image_id",
+        score_col="score",
+        budget=budget,
+        reason_col="reason",
+        action_col="suggested_action",
+        slice_col="slice",
+        evidence_col="evidence_path",
+        ascending=False,
+    )
+
+    write_review_queue(
+        queue,
+        ctx.out("review_queue.csv"),
+    )
+
+    render_contact_sheet(
+        queue,
+        ctx.out("contact_sheet.html"),
+        image_col="evidence_path",
+        fields=(
+            "rank",
+            "item_id",
+            "score",
+            "reason",
+            "suggested_action",
+            "slice",
+        ),
+        title="T02 - Raw QC Human Review",
+    )
+
+    ctx.stats["review_budget"] = budget
+    ctx.stats["n_review_queue"] = len(queue)
+
+    _log(
+        ctx,
+        actor="pipeline",
+        action="create_review_queue",
+        item_id="review_queue.csv",
+        after={"budget": budget, "n_items": len(queue)},
+    )
+
+    return queue
 
 
-# ---------------------------------------------------------------- 04 review
-def review(ctx: RunContext, scored: pd.DataFrame, queue: pd.DataFrame) -> pd.DataFrame:
-    """If a reviewed queue exists (out/review_queue_reviewed.csv), apply it. Otherwise pass through.
+# ---------------------------------------------------------
+# 04 REVIEW
+# ---------------------------------------------------------
 
-    TODO: decide what an `edit` / `reject` means for your track and apply it
-    (e.g. via common.review.apply_overrides), logging every change to ctx.audit.
+def review(
+    ctx: RunContext,
+    scored: pd.DataFrame,
+    queue: pd.DataFrame,
+) -> pd.DataFrame:
+    """Apply human review decisions when a reviewed CSV exists.
+
+    approve  -> KEEP
+    reject   -> RECAPTURE
+    escalate -> HOLD
+    edit     -> update score using numeric override_value
+    skip     -> no change
     """
+
+    final = scored.copy()
+
     reviewed_path = ctx.output_dir / "review_queue_reviewed.csv"
-    if reviewed_path.exists():
-        reviewed = load_review_decisions(reviewed_path)
-        ctx.stats["n_reviewed"] = len(reviewed)
-        # TODO: apply overrides
-    return scored
+
+    decisions = {}
+
+    if not reviewed_path.exists():
+        ctx.stats["n_reviewed"] = 0
+        ctx.stats["review_complete"] = False
+        ctx.stats["review_decisions"] = decisions
+        return final
+
+    reviewed = load_review_decisions(reviewed_path)
+
+    valid_ids = set(queue["item_id"].astype(str))
+
+    for row in reviewed.itertuples(index=False):
+        item_id = str(row.item_id)
+        decision = str(row.reviewer_decision).lower()
+        reviewer = str(row.reviewer)
+        note = str(row.review_note)
+
+        if item_id not in valid_ids:
+            raise ValueError(
+                f"Reviewed image {item_id} is not in the review queue"
+            )
+
+        if item_id not in set(final["image_id"].astype(str)):
+            raise ValueError(f"Unknown image_id in review: {item_id}")
+
+        if decision == "approve":
+            decisions[item_id] = "KEEP"
+
+        elif decision == "reject":
+            decisions[item_id] = "RECAPTURE"
+
+        elif decision == "escalate":
+            decisions[item_id] = "HOLD"
+
+        elif decision == "edit":
+            value = str(row.override_value).strip()
+
+            if not value:
+                raise ValueError(
+                    f"Edit decision for {item_id} needs numeric override_value"
+                )
+
+            try:
+                new_score = float(value)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid score override for {item_id}: {value}"
+                ) from exc
+
+            if not 0 <= new_score <= 1:
+                raise ValueError(
+                    f"Override score must be between 0 and 1: {item_id}"
+                )
+
+            mask = final["image_id"].astype(str) == item_id
+            final.loc[mask, "score"] = new_score
+            decisions[item_id] = "EDITED"
+
+        elif decision == "skip":
+            decisions[item_id] = "SKIP"
+
+        _log(
+            ctx,
+            actor=reviewer,
+            action=f"human_review_{decision}",
+            item_id=item_id,
+            after={
+                "decision": decision,
+                "note": note,
+                "override_value": str(row.override_value),
+            },
+        )
+
+    ctx.stats["n_reviewed"] = len(reviewed)
+    ctx.stats["review_complete"] = len(reviewed) == len(queue)
+    ctx.stats["review_decisions"] = decisions
+
+    return final
 
 
-# ---------------------------------------------------------------- 05 decide
+# ---------------------------------------------------------
+# 05 DECIDE
+# ---------------------------------------------------------
 
 def decide(ctx: RunContext, final: pd.DataFrame) -> Decision:
-    return Decision(
-        status="GO",
-        reason_code="PILOT_RUN",
-        reason="Baseline pipeline completed successfully",
-        owner=ctx.config.get("owner", "G00"),
-        scope=ctx.track
-    )
-# def decide(ctx: RunContext, final: pd.DataFrame) -> Decision:
-#     # TODO: replace with your policy (thresholds frozen BEFORE looking at eval results)
-#     return Decision(status="HOLD", reason_code="POLICY_NOT_IMPLEMENTED", reason="Decision policy not implemented yet",
-#                     owner=ctx.config.get("owner", "TODO-owner"), scope=ctx.track)
+    """Produce an auditable release/recapture decision."""
 
+    owner = str(ctx.config.get("owner", "")).strip()
+
+    if not owner or "TODO" in owner.upper():
+        raise ValueError(
+            "Please replace the TODO owner in configs/lab.yaml "
+            "with the actual reviewer name/role."
+        )
+
+    decisions = ctx.stats.get("review_decisions", {})
+    values = list(decisions.values())
+
+    evidence = [
+        str(ctx.output_dir / "ranked_review.csv"),
+        str(ctx.output_dir / "review_queue.csv"),
+        str(ctx.output_dir / "contact_sheet.html"),
+        str(ctx.output_dir / "audit_log.jsonl"),
+    ]
+
+    metrics = {
+        "n_images": int(len(final)),
+        "n_reviewed": int(ctx.stats.get("n_reviewed", 0)),
+        "review_budget": int(ctx.param("budget", 20)),
+        "mean_score": float(final["score"].mean()),
+    }
+
+    if "RECAPTURE" in values:
+        return Decision(
+            status="REWORK",
+            reason_code="HUMAN_RECAPTURE_REQUIRED",
+            reason="Human review identified one or more images requiring recapture.",
+            owner=owner,
+            scope="T02",
+            evidence=evidence,
+            metrics=metrics,
+        )
+
+    if "HOLD" in values:
+        return Decision(
+            status="HOLD",
+            reason_code="HUMAN_ESCALATION",
+            reason="One or more images were escalated for further review.",
+            owner=owner,
+            scope="T02",
+            evidence=evidence,
+            metrics=metrics,
+        )
+
+    budget = int(ctx.param("budget", 20))
+
+    if (
+        ctx.stats.get("review_complete", False)
+        and len(values) == min(budget, len(final))
+        and all(v in {"KEEP", "EDITED"} for v in values)
+    ):
+        return Decision(
+            status="GO",
+            reason_code="HUMAN_REVIEW_APPROVED",
+            reason="All images in the review queue were approved by the reviewer.",
+            owner=owner,
+            scope="T02",
+            evidence=evidence,
+            metrics=metrics,
+        )
+
+    return Decision(
+        status="HOLD",
+        reason_code="REVIEW_PENDING",
+        reason="Human review is incomplete; further review is required.",
+        owner=owner,
+        scope="T02",
+        evidence=evidence,
+        metrics=metrics,
+    )
+
+    dark_risk = _risk_from_dev(
+        features["frac_dark"],
+        dev["frac_dark"],
+        low_is_risk=False,
+    )
+
+    glare_risk = _risk_from_dev(
+        features["frac_saturated"],
+        dev["frac_saturated"],
+        low_is_risk=False,
+    )
+
+    # Fixed weighted combination.
+    features["score"] = (
+        0.45 * blur_risk
+        + 0.30 * dark_risk
+        + 0.25 * glare_risk
+    )
+
+    # Identify the dominant signal for human review.
+    risk_matrix = np.column_stack([
+        blur_risk,
+        dark_risk,
+        glare_risk,
+    ])
+
+    risk_names = np.array([
+        "BLUR_SUSPECT",
+        "DARK_IMAGE",
+        "GLARE_SUSPECT",
+    ])
+
+    features["reason"] = risk_names[
+        np.argmax(risk_matrix, axis=1)
+    ]
+
+    features["suggested_action"] = np.where(
+        features["score"] >= 0.65,
+        "RECAPTURE",
+        "KEEP",
+    )
+
+    features["slice"] = (
+        "camera=" + features["camera_id"]
+        + ";light=" + features["light"]
+    )
+
+    features = features.sort_values(
+        ["score", "image_id"],
+        ascending=[False, True],
+        kind="mergesort",
+    ).reset_index(drop=True)
+
+    ctx.stats["n_dev"] = len(dev)
+    ctx.stats["feature_weights"] = {
+        "blur": 0.45,
+        "darkness": 0.30,
+        "glare": 0.25,
+    }
+    ctx.stats["score_threshold_for_recapture"] = 0.65
+    ctx.stats["mean_score"] = float(features["score"].mean())
+
+    _log(
+        ctx,
+        actor="pipeline",
+        action="process_images",
+        item_id="T02",
+        after={
+            "n_images": len(features),
+            "n_dev": len(dev),
+            "features": [
+                "sharpness",
+                "brightness_mean",
+                "brightness_std",
+                "frac_dark",
+                "frac_saturated",
+            ],
+        },
+    )
+
+    return features
+
+
+
+# ---------------------------------------------------------
+# RUN
+# ---------------------------------------------------------
 
 def run(ctx: RunContext) -> None:
+    """Execute the complete T02 pipeline."""
+
     spec = get_track(ctx.track)
+
+    if ctx.track != "t02":
+        raise ValueError("src.pipeline.py currently supports T02 only")
+
     data = load(ctx)
+
     scored = process(ctx, data)
+
     ctx.stats["n_items"] = len(scored)
+
     queue = rank(ctx, scored)
+
     final = review(ctx, scored, queue)
-    final[spec.pred_columns + [c for c in final.columns if c not in spec.pred_columns]].to_csv(ctx.out(spec.pred_file), index=False)
-    write_decision(decide(ctx, final), ctx.out("decision.json"), ctx.out("decision_log.csv"))
+
+    # Required output columns: image_id, score.
+    output_columns = (
+        spec.pred_columns
+        + [
+            col for col in final.columns
+            if col not in spec.pred_columns
+        ]
+    )
+
+    final[output_columns].to_csv(
+        ctx.out(spec.pred_file),
+        index=False,
+    )
+
+    decision = decide(ctx, final)
+
+    write_decision(
+        decision,
+        ctx.out("decision.json"),
+        ctx.out("decision_log.csv"),
+    )
+
+    print("T02 pipeline completed.")
+    print(f"Images processed : {len(final)}")
+    print(f"Review queue     : {len(queue)}")
+    print(f"Prediction file  : {ctx.out(spec.pred_file)}")
+    print(f"Decision         : {decision.status}")
