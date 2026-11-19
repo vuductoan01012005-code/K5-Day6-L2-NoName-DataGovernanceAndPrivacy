@@ -1,0 +1,7 @@
+# Keep fixture text byte-for-byte consistent with the SHA-256 manifests.
+fixtures/**/*.csv text eol=lf
+fixtures/**/*.json text eol=lf
+fixtures/**/*.md text eol=lf
+fixtures/**/*.txt text eol=lf
+fixtures/**/*.yaml text eol=lf
+fixtures/**/*.yml text eol=lf
